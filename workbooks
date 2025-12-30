@@ -1,1 +1,133 @@
-
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/managedapplicationDefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workbookName": {
+      "type": "string",
+      "defaultValue": "Identity & Access Monitoring",
+      "metadata": {
+        "description": "Name of the Sentinel workbook."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for workbook resource."
+      }
+    },
+    "workspaceResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the Log Analytics workspace linked to Sentinel."
+      }
+    }
+  },
+  "resources": [
+    {
+      "name": "[guid(parameters('workbookName'), parameters('workspaceResourceId'))]",
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2022-04-01",
+      "location": "[parameters('location')]",
+      "kind": "shared",
+      "properties": {
+        "displayName": "[parameters('workbookName')]",
+        "category": "workbook",
+        "serializedData": "[base64(string(json(variables('workbookContent'))))]",
+        "sourceId": "[parameters('workspaceResourceId')]"
+      }
+    }
+  ],
+  "variables": {
+    "workbookContent": {
+      "version": "Notebook/1.0",
+      "items": [
+        {
+          "type": 1,
+          "content": {
+            "json": {
+              "version": "KqlItem/1.0",
+              "query": "SigninLogs\n| summarize Count = count() by AuthenticationRequirement, ResultType, bin(TimeGenerated, 1h)",
+              "size": 1,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "gridSettings": {
+                "formatters": [],
+                "columnsWidth": []
+              },
+              "timeContext": {
+                "durationMs": 86400000
+              },
+              "visualization": "timechart",
+              "title": "MFA Usage – Success & Failure"
+            }
+          },
+          "name": "mfaUsage"
+        },
+        {
+          "type": 1,
+          "content": {
+            "json": {
+              "version": "KqlItem/1.0",
+              "query": "AuditLogs\n| where OperationName contains \"StrongAuthentication\"\n| summarize Count = count() by OperationName, bin(TimeGenerated, 1d)",
+              "size": 1,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "title": "MFA Registration Activity"
+            }
+          },
+          "name": "mfaRegistration"
+        },
+        {
+          "type": 1,
+          "content": {
+            "json": {
+              "version": "KqlItem/1.0",
+              "query": "IdentityProtectionRiskEvents\n| summarize Count = count() by riskEventType, riskLevel, bin(TimeGenerated, 1h)",
+              "size": 1,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "title": "Risk Detections Over Time"
+            }
+          },
+          "name": "riskDetections"
+        },
+        {
+          "type": 1,
+          "content": {
+            "json": {
+              "version": "KqlItem/1.0",
+              "query": "RiskyUsers\n| summarize Count = count() by riskLevel, state",
+              "size": 1,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "piechart",
+              "title": "Risky Users by Level & State"
+            }
+          },
+          "name": "riskyUsers"
+        },
+        {
+          "type": 1,
+          "content": {
+            "json": {
+              "version": "KqlItem/1.0",
+              "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| extend Role = tostring(TargetResources[0].displayName)\n| summarize Count = count() by UserPrincipalName, Role, bin(TimeGenerated, 1h)",
+              "size": 1,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "title": "PIM Activations by User & Role"
+            }
+          },
+          "name": "pimActivations"
+        }
+      ],
+      "fallbackResourceIds": [
+        "[parameters('workspaceResourceId')]"
+      ]
+    }
+  }
+}
