@@ -1,5 +1,5 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/managedapplicationDefinition.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
     "workbookName": {
@@ -114,7 +114,7 @@
           "content": {
             "json": {
               "version": "KqlItem/1.0",
-              "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| extend Role = tostring(TargetResources[0].displayName)\n| summarize Count = count() by UserPrincipalName, Role, bin(TimeGenerated, 1h)",
+              "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| extend RoleName = tostring(TargetResources[0].displayName)\n| extend InitiatedByType = tostring(InitiatedBy.user.type)\n| summarize Count = count() by UserPrincipalName, RoleName, InitiatedByType, bin(TimeGenerated, 1d)\n| order by Count desc",
               "size": 1,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
