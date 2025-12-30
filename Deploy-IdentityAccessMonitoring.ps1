@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [string]$SubscriptionId,
 
@@ -19,7 +19,8 @@ if (-not $Location) {
 Write-Host "Setting subscription context..." -ForegroundColor Cyan
 Select-AzSubscription -SubscriptionId $SubscriptionId | Out-Null
 
-$templateFile = Join-Path $PSScriptRoot "solution\identity-access-monitoring-solution.json"
+# When the script lives in scripts/, the template is in ../solution/
+$templateFile = Join-Path $PSScriptRoot "..\solution\identity-access-monitoring-solution.json"
 
 if (!(Test-Path $templateFile)) {
     throw "Template not found: $templateFile"
