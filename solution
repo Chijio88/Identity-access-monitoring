@@ -1,0 +1,157 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "solutionName": {
+      "type": "string",
+      "defaultValue": "IdentityAccessMonitoring"
+    }
+  },
+  "variables": {
+    "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationsManagement/solutions",
+      "apiVersion": "2015-11-01-preview",
+      "name": "[concat(parameters('solutionName'), '(', parameters('workspaceName'), ')')]",
+      "location": "[parameters('location')]",
+      "plan": {
+        "name": "[concat(parameters('solutionName'), '(', parameters('workspaceName'), ')')]",
+        "publisher": "Custom",
+        "product": "[concat('OMSGallery/', parameters('solutionName'))]"
+      },
+      "properties": {
+        "workspaceResourceId": "[variables('workspaceResourceId')]"
+      },
+      "resources": [
+        {
+          "type": "Microsoft.OperationalInsights/workspaces/providers/metadata",
+          "apiVersion": "2022-01-01-preview",
+          "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('solutionName'))]",
+          "properties": {
+            "contentId": "[parameters('solutionName')]",
+            "kind": "Solution",
+            "parentId": "[variables('workspaceResourceId')]",
+            "version": "1.0.0",
+            "contentSchemaVersion": "2.0.0",
+            "displayName": "Identity & Access Monitoring",
+            "description": "Workbook, Analytics, and Hunting queries for MFA, risk, and PIM activity.",
+            "source": {
+              "kind": "Custom"
+            },
+            "author": {
+              "name": "Internal"
+            }
+          }
+        }
+      ]
+    },
+
+    // Workbook (linked)
+    {
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2022-04-01",
+      "name": "[guid('IdentityAccessMonitoringWorkbook', variables('workspaceResourceId'))]",
+      "location": "[parameters('location')]",
+      "kind": "shared",
+      "properties": {
+        "displayName": "Identity & Access Monitoring",
+        "category": "workbook",
+        "serializedData": "[base64(string(json(variables('workbookContent'))))]",
+        "sourceId": "[variables('workspaceResourceId')]"
+      }
+    },
+
+    // Analytics rules
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2022-11-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/MFAAnomaliesRule')]",
+      "properties": {
+        "displayName": "MFA Anomalies - High Failure Rate",
+        "description": "Detects spikes in MFA failures per user over the last hour.",
+        "severity": "Medium",
+        "enabled": true,
+        "query": "SigninLogs\n| where AuthenticationRequirement == \"multiFactorAuthentication\"\n| where ResultType != 0\n| summarize FailedCount = count() by UserPrincipalName, bin(TimeGenerated, 1h)\n| where FailedCount > 10",
+        "queryFrequency": "PT1H",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionEnabled": false,
+        "tactics": [ "CredentialAccess" ],
+        "kind": "Scheduled"
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2022-11-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/PIMMisuseRule')]",
+      "properties": {
+        "displayName": "PIM Misuse - High Privilege Activations",
+        "description": "Detects multiple PIM activations for high privilege roles in a short timeframe.",
+        "severity": "High",
+        "enabled": true,
+        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend Role = tostring(TargetResources[0].displayName)\n| where Role in (\"Global Administrator\", \"Privileged Role Administrator\", \"Security Administrator\")\n| summarize ActivationCount = count() by Role, bin(TimeGenerated, 1h)\n| where ActivationCount > 3",
+        "queryFrequency": "PT1H",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionEnabled": false,
+        "tactics": [ "PrivilegeEscalation" ],
+        "kind": "Scheduled"
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2022-11-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/RiskSpikeRule')]",
+      "properties": {
+        "displayName": "Risk Spike - High Risk Detections",
+        "description": "Detects spikes in high risk Identity Protection events.",
+        "severity": "High",
+        "enabled": true,
+        "query": "IdentityProtectionRiskEvents\n| where riskLevel == \"high\"\n| summarize HighRiskCount = count() by bin(TimeGenerated, 1h)\n| where HighRiskCount > 5",
+        "queryFrequency": "PT1H",
+        "queryPeriod": "PT24H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionEnabled": false,
+        "tactics": [ "CredentialAccess" ],
+        "kind": "Scheduled"
+      }
+    },
+
+    // Hunting queries
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/huntingQueries",
+      "apiVersion": "2022-11-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/MFABypassPatterns')]",
+      "properties": {
+        "displayName": "Hunting - Suspicious MFA Patterns",
+        "query": "SigninLogs\n| where AuthenticationRequirement in (\"multiFactorAuthentication\", \"mfaIfConfigured\")\n| where ResultType == 0\n| summarize SuccessCount = count(), Locations = make_set(Location) by UserPrincipalName, bin(TimeGenerated, 1d)\n| where array_length(Locations) > 2",
+        "tactics": [ "CredentialAccess" ],
+        "description": "Finds accounts with successful MFA from multiple locations in short timeframes."
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/huntingQueries",
+      "apiVersion": "2022-11-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/PIMAbusePatterns')]",
+      "properties": {
+        "displayName": "Hunting - PIM Abuse Patterns",
+        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| extend Role = tostring(TargetResources[0].displayName)\n| summarize ActivationCount = count(), Roles = make_set(Role) by UserPrincipalName, bin(TimeGenerated, 1d)\n| where ActivationCount > 5",
+        "tactics": [ "PrivilegeEscalation" ],
+        "description": "Finds users activating multiple or repeated high privilege roles."
+      }
+    }
+  ],
+  "outputs": { }
+}
