@@ -15,7 +15,8 @@
     }
   },
   "variables": {
-    "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+    "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+    "workbookContent": "{}"
   },
   "resources": [
     {
@@ -54,8 +55,6 @@
         }
       ]
     },
-
-    // Workbook (linked)
     {
       "type": "Microsoft.Insights/workbooks",
       "apiVersion": "2022-04-01",
@@ -65,12 +64,10 @@
       "properties": {
         "displayName": "Identity & Access Monitoring",
         "category": "workbook",
-        "serializedData": "[base64(string(json(variables('workbookContent'))))]",
+        "serializedData": "[base64(variables('workbookContent'))]",
         "sourceId": "[variables('workspaceResourceId')]"
       }
     },
-
-    // Analytics rules
     {
       "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
       "apiVersion": "2022-11-01-preview",
@@ -80,13 +77,15 @@
         "description": "Detects spikes in MFA failures per user over the last hour.",
         "severity": "Medium",
         "enabled": true,
-        "query": "SigninLogs\n| where AuthenticationRequirement == \"multiFactorAuthentication\"\n| where ResultType != 0\n| summarize FailedCount = count() by UserPrincipalName, bin(TimeGenerated, 1h)\n| where FailedCount > 10",
+        "query": "SigninLogs\n| where AuthenticationRequirement == \"multiFactorAuthentication\"\n| where ResultType != 0\n| summarize FailedCount = count() by UserPrincipalName, bin(TimeGenerated, 1h)\n| where FailedCount > 5",
         "queryFrequency": "PT1H",
         "queryPeriod": "PT1H",
         "triggerOperator": "GreaterThan",
-        "triggerThreshold": 0,
+        "triggerThreshold": 5,
         "suppressionEnabled": false,
-        "tactics": [ "CredentialAccess" ],
+        "tactics": [
+          "CredentialAccess"
+        ],
         "kind": "Scheduled"
       }
     },
@@ -99,13 +98,15 @@
         "description": "Detects multiple PIM activations for high privilege roles in a short timeframe.",
         "severity": "High",
         "enabled": true,
-        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend Role = tostring(TargetResources[0].displayName)\n| where Role in (\"Global Administrator\", \"Privileged Role Administrator\", \"Security Administrator\")\n| summarize ActivationCount = count() by Role, bin(TimeGenerated, 1h)\n| where ActivationCount > 3",
+        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend Role = tostring(TargetResources[0].displayName), User = tostring(InitiatedBy.user.userPrincipalName)\n| summarize Activations = count() by User, Role, bin(TimeGenerated, 1h)\n| where Activations > 1",
         "queryFrequency": "PT1H",
         "queryPeriod": "PT1H",
         "triggerOperator": "GreaterThan",
-        "triggerThreshold": 0,
+        "triggerThreshold": 1,
         "suppressionEnabled": false,
-        "tactics": [ "PrivilegeEscalation" ],
+        "tactics": [
+          "PrivilegeEscalation"
+        ],
         "kind": "Scheduled"
       }
     },
@@ -122,22 +123,24 @@
         "queryFrequency": "PT1H",
         "queryPeriod": "PT24H",
         "triggerOperator": "GreaterThan",
-        "triggerThreshold": 0,
+        "triggerThreshold": 5,
         "suppressionEnabled": false,
-        "tactics": [ "CredentialAccess" ],
+        "tactics": [
+          "CredentialAccess"
+        ],
         "kind": "Scheduled"
       }
     },
-
-    // Hunting queries
     {
       "type": "Microsoft.OperationalInsights/workspaces/providers/huntingQueries",
       "apiVersion": "2022-11-01-preview",
       "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/MFABypassPatterns')]",
       "properties": {
         "displayName": "Hunting - Suspicious MFA Patterns",
-        "query": "SigninLogs\n| where AuthenticationRequirement in (\"multiFactorAuthentication\", \"mfaIfConfigured\")\n| where ResultType == 0\n| summarize SuccessCount = count(), Locations = make_set(Location) by UserPrincipalName, bin(TimeGenerated, 1d)\n| where array_length(Locations) > 2",
-        "tactics": [ "CredentialAccess" ],
+        "query": "SigninLogs\n| where AuthenticationRequirement in (\"multiFactorAuthentication\", \"mfaIfConfigured\")\n| where ResultType == 0\n| extend Loc = tostring(Location)\n| summarize SuccessCount = count(), Locations = make_set(Loc, 10) by UserPrincipalName, bin(TimeGenerated, 1h)\n| where array_length(Locations) > 1",
+        "tactics": [
+          "CredentialAccess"
+        ],
         "description": "Finds accounts with successful MFA from multiple locations in short timeframes."
       }
     },
@@ -147,11 +150,13 @@
       "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/PIMAbusePatterns')]",
       "properties": {
         "displayName": "Hunting - PIM Abuse Patterns",
-        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| extend Role = tostring(TargetResources[0].displayName)\n| summarize ActivationCount = count(), Roles = make_set(Role) by UserPrincipalName, bin(TimeGenerated, 1d)\n| where ActivationCount > 5",
-        "tactics": [ "PrivilegeEscalation" ],
+        "query": "AuditLogs\n| where Category == \"RoleManagement\"\n| where OperationName contains \"Activate eligible role\"\n| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)\n| summarize Activations = count() by UserPrincipalName, bin(TimeGenerated, 1h)\n| where Activations > 2",
+        "tactics": [
+          "PrivilegeEscalation"
+        ],
         "description": "Finds users activating multiple or repeated high privilege roles."
       }
     }
   ],
-  "outputs": { }
+  "outputs": {}
 }
